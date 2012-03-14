@@ -47,34 +47,44 @@ class Stat (fuse.Stat):
      self.st_ino = 0
      self.st_dev = 0
      self.st_nlink = 2
-     self.st_uid = 0
-     self.st_gid = 0
+     self.st_uid = os.getuid()
+     self.st_gid = os.getgid()
      self.st_size = 4096
-     self.st_atime = 0
-     self.st_mtime = 0
-     self.st_ctime = 0
+     self.st_atime = int(time.time())
+     self.st_mtime = self.st_atime
+     self.st_ctime = self.st_atime
 
 class Buffer:
-    images = {}
+    """ Manages buffers for reading and writing images from/to imgur """
+    read_images = {}
+    write_images = {}
 
-    def read(link, length, offset):
-        if self.images.has_key(link) and self.images[link]["last_read"] == offset:
-            pass
-        else:
-            self.images[link] = {"socket": urllib2.urlopen(link)}
+    def read (self, link, length, offset):
+        """ Stores the image data to manage reads """
+        if link not in self.read_images:
+            self.read_images[link] = {"buffer": urllib2.urlopen(link).read()}
+        if offset > len(self.read_images[link]["buffer"]):
+            return None
+        return self.read_images[link]["buffer"][offset:offset+length]
 
-        buf = self.images[link]["socket"].read(length - 1);
-        self.images[link]["last_read"] = offset + len(buf)
-        return buf
-
+def split_path(path):
+    """ Splits a path into album and image name """
+    p = path.split("/");
+    if len(p) > 3:
+        return [None, None]
+    elif len(p) == 3:
+        return [p[1], p[2]]
+    else:
+        return [None, p[1]]
 
 class Imgur:
+    """ Wrapper for the Imgur api """
     api_endpoint = 'http://api.imgur.com/2/'
     opener = urllib2.build_opener(urllib2.HTTPCookieProcessor())
     urllib2.install_opener(opener)
-    buf = Buffer()
 
     # We use last_fetch to cache image list for 10 seconds
+    # TODO: Make cache duration a command line option
     last_fetch = 0
 
     def __init__ (self, username, password):
@@ -84,7 +94,7 @@ class Imgur:
                         urllib.urlencode({'username' : username,
                                           'password' : password}));
         except urllib2.HTTPError, e:
-            error = simplejson.loads(e.readline)
+            error = simplejson.loads(e.readline())
             if error.has_key('error'):
                 print error['error']['message']
                 sys.exit(0)
@@ -140,6 +150,7 @@ class Imgur:
 
 
 class ImgurFS (fuse.Fuse):
+    buf = Buffer()
     def __init__ (self, *args, **kw):
         """ Initialize the fuse filesystem 
             Note: run with -f parameter for debugging 
@@ -154,18 +165,16 @@ class ImgurFS (fuse.Fuse):
         """ Returns the attributes for the given path
             Defaults are taken from Stat class defined above
         """
-        logger.debug(inspect.stack()[0][3] + path);
+        print '*** getattr', path
         st = Stat();
-        p = path.split('/')[1:]
-        st.st_atime = int(time.time())
-        st.st_mtime = st.st_atime
-        st.st_ctime = st.st_atime
+        album, name = split_path(path)
 
+        if name is None:
+            return - errno.ENOENT
         # Path is a file
-        if path != '/':
-            name = path[1:]
+        if name != '':
             if not self.imgur.image_list().has_key(name):
-                return - errno.ENOENT
+                return -errno.ENOENT
             image = self.imgur.image_list()[name];
             st.st_mode = stat.S_IFREG | 0755
             st.st_ctime = time.mktime(datetime.strptime(image["datetime"], 
@@ -175,6 +184,7 @@ class ImgurFS (fuse.Fuse):
         return st
 
     def readdir (self, path, offset):
+        print '*** readdir', path, offset
         """ Returns a generator for files in user's account """
         dirents = ['.', '..']
         images = self.imgur.image_list()
@@ -191,11 +201,9 @@ class ImgurFS (fuse.Fuse):
     
     def read (self, path, length, offset):
         print '*** read', path, length, offset
-        image = self.imgur.image_list()[path[1:]];
-        print "http://i.imgur.com/" + path[1:]
-        return urllib2.urlopen(image["link"]).read(65536);
-        self.imgur.read_image(path[1:])
-        return -errno.ENOSYS
+        album, name = split_path(path);
+        image = self.imgur.image_list()[name];
+        return self.buf.read(image["link"], length, offset);
 
     def fsync ( self, path, isFsyncFile ):
         logger.debug(inspect.stack()[0][3] + path);
@@ -222,7 +230,7 @@ class ImgurFS (fuse.Fuse):
         print '*** release', path, flags
         return -errno.ENOSYS
 
-    def rename ( self, oldPath, newPath ):
+    def rename (self, oldPath, newPath):
         logger.debug(inspect.stack()[0][3] + path);
         print '*** rename', oldPath, newPath
         return -errno.ENOSYS
@@ -242,11 +250,6 @@ class ImgurFS (fuse.Fuse):
         print '*** symlink', targetPath, linkPath
         return -errno.ENOSYS
 
-    def truncate ( self, path, size ):
-        logger.debug(inspect.stack()[0][3] + path);
-        print '*** truncate', path, size
-        return -errno.ENOSYS
-
     def unlink ( self, path ):
         logger.debug(inspect.stack()[0][3] + path);
         print '*** unlink', path
@@ -264,13 +267,15 @@ class ImgurFS (fuse.Fuse):
     
     """ The following operations make no sense in our filesystem """
     def chmod (self, path, mode):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** chmod', path, oct(mode)
         return -errno.ENOSYS
 
     def chown (self, path, uid, gid):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** chown', path, uid, gid
+        return -errno.ENOSYS
+
+    def truncate ( self, path, size ):
+        print '*** truncate', path, size
         return -errno.ENOSYS
 
 def main():
