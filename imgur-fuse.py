@@ -34,12 +34,6 @@ import errno
 from datetime import datetime
 
 fuse.fuse_python_api = (0, 2)
-logger = logging.getLogger('imgur-fuse')
-hdlr = logging.FileHandler('imgur-fuse.log')
-formatter = logging.Formatter('%(asctime)s %(levelname)s %(message)s')
-hdlr.setFormatter(formatter)
-logger.addHandler(hdlr) 
-logger.setLevel(logging.DEBUG)
 
 class Stat (fuse.Stat):
  def __init__ (self):
@@ -66,6 +60,11 @@ class Buffer:
         if offset > len(self.read_images[link]["buffer"]):
             return None
         return self.read_images[link]["buffer"][offset:offset+length]
+
+    def clear (self, link):
+        """ Clear read buffer for image from memory """
+        if link in self.read_images:
+            self.read_images.pop(link)
 
 def split_path(path):
     """ Splits a path into album and image name """
@@ -133,7 +132,15 @@ class Imgur:
 
         for i in images:
             extension = "." + i["image"]["type"].split("/")[1]
-            name = i["image"]["name"] or i["image"]["hash"]
+
+            # We prefer showing images with their name, with a fallover to hash
+            # In the rare case an image exists with same names, the subsequent names
+            # are appended with a hash
+            if i["image"]["name"] not in self.images:
+                name = i["image"]["name"] or i["image"]["hash"]
+            else:
+                name = i["image"]["name"] + "_" + i["image"]["hash"]
+
             name += extension
 
             self.images[name] = { "hash": i["image"]["hash"],
@@ -196,7 +203,7 @@ class ImgurFS (fuse.Fuse):
     def open (self, path, flags):
         print '*** open', path, flags
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR 
-        if (flags & accmode) != os.O_RDONLY:
+        if (flags & accmode) not in [os.O_RDONLY, os.O_WRONLY]:
             return -errno.EACCES
     
     def read (self, path, length, offset):
@@ -205,63 +212,54 @@ class ImgurFS (fuse.Fuse):
         image = self.imgur.image_list()[name];
         return self.buf.read(image["link"], length, offset);
 
-    def fsync ( self, path, isFsyncFile ):
-        logger.debug(inspect.stack()[0][3] + path);
+    def release (self, path, flags):
+        print '*** release', path, flags
+        album, name = split_path(path);
+        image = self.imgur.image_list()[name];
+        self.buf.clear(image["link"])
+        return 0
+
+    def fsync (self, path, isFsyncFile):
         print '*** fsync', path, isFsyncFile
         return -errno.ENOSYS
 
     def link ( self, targetPath, linkPath ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** link', targetPath, linkPath
         return -errno.ENOSYS
 
     def mkdir ( self, path, mode ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** mkdir', path, oct(mode)
         return -errno.ENOSYS
 
     def readlink ( self, path ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** readlink', path
         return -errno.ENOSYS
 
-    def release ( self, path, flags ):
-        logger.debug(inspect.stack()[0][3] + path);
-        print '*** release', path, flags
-        return -errno.ENOSYS
-
     def rename (self, oldPath, newPath):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** rename', oldPath, newPath
         return -errno.ENOSYS
 
     def rmdir ( self, path ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** rmdir', path
         return -errno.ENOSYS
 
     def statfs ( self ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** statfs'
         return -errno.ENOSYS
 
     def symlink ( self, targetPath, linkPath ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** symlink', targetPath, linkPath
         return -errno.ENOSYS
 
     def unlink ( self, path ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** unlink', path
         return -errno.ENOSYS
 
     def utime ( self, path, times ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** utime', path, times
         return -errno.ENOSYS
 
     def write ( self, path, buf, offset ):
-        logger.debug(inspect.stack()[0][3] + path);
         print '*** write', path, buf, offset
         return -errno.ENOSYS
     
@@ -274,7 +272,7 @@ class ImgurFS (fuse.Fuse):
         print '*** chown', path, uid, gid
         return -errno.ENOSYS
 
-    def truncate ( self, path, size ):
+    def truncate (self, path, size):
         print '*** truncate', path, size
         return -errno.ENOSYS
 
