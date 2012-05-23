@@ -6,8 +6,7 @@ if os.path.exists('doc/mount.flickrfs.1.gz'):
 else:
     df = [] 
 
-setup (install_requires = ['fuse-python>=0.2'],
-       name = 'imgurfs',
+setup (name = 'imgurfs',
        version = '0.0.1',
        description = 'Virtual filesystem for imgur',
        author = 'Gaganpreet',
