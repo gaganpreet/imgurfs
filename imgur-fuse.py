@@ -53,11 +53,13 @@ class Stat (fuse.Stat):
 
 class Buffer:
     """ Manages buffers for reading and writing images from/to imgur """
-    read_images = {}
-    write_images = {}
+
+    def __init__ (self):
+        self.read_images = {}
+        self.write_images = {}
 
     def read (self, link, length, offset):
-        """ Stores the image data to manage reads """
+        """ Download the image data to a buffer to manage reads """
         if link not in self.read_images:
             self.read_images[link] = dict(buffer = urllib2.urlopen(link).read())
         if offset > len(self.read_images[link]['buffer']):
@@ -65,12 +67,12 @@ class Buffer:
         return self.read_images[link]['buffer'][offset:offset+length]
 
     def clear_read (self, link):
-        """ Clear read for image from memory """
+        """ Clear download buffer from memory """
         if link in self.read_images:
             self.read_images.pop(link)
 
     def create (self, album, name):
-        """ Initialize a StringIO object for our new image in album """
+        """ Initialize a StringIO object for our new image in album (image upload is asynchronous) """
         if album not in self.write_images:
             self.write_images[album] = {}
         self.write_images[album][name] = {'data' : StringIO()}
@@ -108,18 +110,18 @@ class Buffer:
 
 class Imgur:
     """ Wrapper for the Imgur api """
-    # TODO: Error checking for api requests
-    api_endpoint = 'http://api.imgur.com/2/'
-    opener = urllib2.build_opener(urllib2.HTTPCookieProcessor())
-    urllib2.install_opener(opener)
-
-    # We use cache to cache image and album list for 10 seconds
-    # TODO: Make cache duration a command line option
-    cache = {}
-    cache_albums = {'time': 0, 'list': {}}
 
     def __init__ (self, username, password):
         """ Signs into imgur """
+        # TODO: Error checking for api requests
+        self.api_endpoint = 'http://api.imgur.com/2/'
+        self.opener = urllib2.build_opener(urllib2.HTTPCookieProcessor())
+        urllib2.install_opener(self.opener)
+ 
+        # We use cache to cache image and album list for 10 seconds
+        # TODO: Make cache duration a command line option
+        self.cache = {}
+        self.cache_albums = {'time': 0, 'list': {}}
         try:
             r = self.opener.open(self.api_endpoint + 'signin.json',
                         urllib.urlencode({'username' : username,
@@ -248,11 +250,11 @@ class Imgur:
         self.api_request('account/albums/' + album_hash + '.json', dict(add_images = ','.join(hashes)))
 
 class ImgurFS (fuse.Fuse):
-    buf = Buffer()
     def __init__ (self, *args, **kw):
         """ Initialize the fuse filesystem 
             Note: run with -f parameter for debugging 
         """
+        self.buf = Buffer()
         fuse.Fuse.__init__(self, *args, **kw)
         username = raw_input('Imgur username/email: ')
         password = getpass.getpass('Password: ')
@@ -276,12 +278,15 @@ class ImgurFS (fuse.Fuse):
     def parse_path(self, path):
         """ Parses a path into album and image name
             Possible inputs are:
+                /
                 /image_name (Belongs to None album)
                 /album_name
                 /album_name/image_name
             Returns a list [album_name, image_name]
         """
         # TODO: Try to write this function more concisely
+
+        # Path can't have more than two slashes
         if path.count('/') > 2 or path == '/':
             return [None, None]
 
@@ -420,7 +425,7 @@ class ImgurFS (fuse.Fuse):
         st.f_bfree = self.imgur.ratelimit['remaining']
         return st
 
-    def unlink ( self, path ):
+    def unlink (self, path):
         print '*** unlink', path
         return -errno.ENOSYS
 
