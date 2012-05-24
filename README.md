@@ -5,6 +5,7 @@ Imgurfs is a virtual filesystem to use imgur like a filesystem. This is mostly w
 
 * Removing images
 * Moving images into and out of albums
+* Adding CLI options
 
 Install
 =======
