@@ -21,7 +21,7 @@
 #=======================================================================
 
 import urllib2
-import logging
+import errno
 from cStringIO import StringIO
 
 class Buffer:
@@ -46,7 +46,8 @@ class Buffer:
             self.read_images.pop(link)
 
     def create (self, album, name):
-        """ Initialize a StringIO object for our new image in album (image upload is asynchronous) """
+        """ Initialize a StringIO object for our new image 
+            in album (image upload is asynchronous) """
         if album not in self.write_images:
             self.write_images[album] = {}
         self.write_images[album][name] = {'data' : StringIO()}
@@ -70,7 +71,7 @@ class Buffer:
 
     def clear_write (self, album, name):
         """ Clear write buffer from memory """
-        f = self.write_images[album].pop(name)
+        self.write_images[album].pop(name)
 
     def buffered_write_list (self, album):
         """ Get the list of images that are in the queue to being uploaded

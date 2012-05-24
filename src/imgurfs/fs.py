@@ -20,22 +20,32 @@
 #  along with this program.  If not, see <http://www.gnu.org/licenses/>.
 #=======================================================================
 
-import getopt
-import sys
 import os
 import fuse
 import getpass
-import logging
-import inspect
 import time
 import stat
 import errno
-from base64 import b64encode
 from datetime import datetime
 from buf import Buffer
 from api import Imgur
 
 fuse.fuse_python_api = (0, 2)
+
+def split_path (path):
+    """ Splits a path into album and name, no existence checks 
+        If the path points to something in /, parent is None and child is the file/dir name
+        If the path is from an album, parent is album and child is the file/dir name
+    """
+    if path.count('/') > 2 or path == '/':
+        return [None, None]
+    
+    relative_path = path[1:]
+    if '/' in relative_path:
+        return relative_path.split('/')
+    else:
+        return [None, relative_path]
+
 
 class Stat (fuse.Stat):
     """ Default stats for getattr """
@@ -52,6 +62,7 @@ class Stat (fuse.Stat):
         self.st_ctime = self.st_atime
 
 class ImgurFS (fuse.Fuse):
+    """ Main class for Imgur filesystem """
     def __init__ (self, *args, **kw):
         """ Initialize the fuse filesystem 
             Note: run with -f parameter for debugging 
@@ -62,20 +73,6 @@ class ImgurFS (fuse.Fuse):
         password = getpass.getpass('Password: ')
         self.imgur = Imgur(username, password)
         print 'Logged in'
-
-    def split_path (self, path):
-        """ Splits a path into album and name, no existence checks 
-            If the path points to something in /, parent is None and child is the file/dir name
-            If the path is from an album, parent is album and child is the file/dir name
-        """
-        if path.count('/') > 2 or path == '/':
-            return [None, None]
-        
-        relative_path = path[1:]
-        if '/' in relative_path:
-            return relative_path.split('/')
-        else:
-            return [None, relative_path]
 
     def parse_path(self, path):
         """ Parses a path into album and image name
@@ -117,8 +114,8 @@ class ImgurFS (fuse.Fuse):
         print '*** getattr', path
         st = Stat()
 
-        print self.split_path(path)
-        parent, child = self.split_path(path)
+        print split_path(path)
+        parent, child = split_path(path)
         if child in self.buf.buffered_write_list(parent):
             st.st_mode = stat.S_IFREG | 0755
             st.st_size = 0
@@ -134,7 +131,7 @@ class ImgurFS (fuse.Fuse):
             image = self.imgur.image_list(album)[name]
             st.st_mode = stat.S_IFREG | 0755
             st.st_ctime = time.mktime(datetime.strptime(image['datetime'], 
-                                                        '%Y-%m-%d %H:%M:%S').timetuple())
+                                      '%Y-%m-%d %H:%M:%S').timetuple())
             st.st_mtime = st.st_ctime
             st.st_size = image['size']
         return st
@@ -143,7 +140,7 @@ class ImgurFS (fuse.Fuse):
         """ Returns a generator for files in user's account """
         print '*** readdir', path, offset
         dirents = ['.', '..']
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
         images = self.imgur.image_list(child)
         dirents.extend(images.keys())
 
@@ -155,6 +152,7 @@ class ImgurFS (fuse.Fuse):
             yield fuse.Direntry(d)
 
     def open (self, path, flags):
+        """ Open a file handler """
         print '*** open', path, flags
         accmode = os.O_RDONLY | os.O_WRONLY | os.O_RDWR 
         if (flags & accmode) not in [os.O_RDONLY, os.O_WRONLY]:
@@ -162,8 +160,9 @@ class ImgurFS (fuse.Fuse):
         return 0
     
     def read (self, path, length, offset):
+        """ Read length bytes starting from offset and return """
         print '*** read', path, length, offset
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
         image = self.imgur.image_list(parent)[child]
         return self.buf.read(image['link'], length, offset)
 
@@ -172,7 +171,7 @@ class ImgurFS (fuse.Fuse):
             If an upload fails, there's no feedback (errno doesn't work for release?)
         """
         print '*** release', path, flags
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
 
         if child in self.buf.buffered_write_list(parent):
             result = self.imgur.upload_image(parent, child, self.buf.get_data(parent, child))
@@ -185,21 +184,24 @@ class ImgurFS (fuse.Fuse):
         return 0
 
     def create (self, path, flags, mode):
+        """ Create a file with flags and mode """
         print '*** create', path, flags, mode
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
         if mode & stat.S_IFREG == 0:
             return - errno.ENOSYS
         self.buf.create(parent, child)
         return 0
 
     def write (self, path, data, offset):
+        """ Write data to create'ed file """
         print '*** write', path, data, offset
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
         return self.buf.write(parent, child, data, offset)
 
     def mkdir (self, path, mode):
+        """ Create a new directory (an album) """
         print '*** mkdir', path, oct(mode)
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
 
         # Can't have directories (albums) at second level
         if parent != None:
@@ -208,8 +210,9 @@ class ImgurFS (fuse.Fuse):
             self.imgur.create_album(child)
 
     def rmdir (self, path):
+        """ Remove a directory (album) """
         print '*** rmdir', path
-        parent, child = self.split_path(path)
+        parent, child = split_path(path)
         if len(self.imgur.image_list(child)):
             return -errno.ENOTEMPTY
         return -errno.ENOSYS
@@ -229,37 +232,4 @@ class ImgurFS (fuse.Fuse):
 
     def unlink (self, path):
         print '*** unlink', path
-        return -errno.ENOSYS
-
-    """ The following operations make no sense in our filesystem """
-    def chmod (self, path, mode):
-        print '*** chmod', path, oct(mode)
-        return -errno.ENOSYS
-
-    def chown (self, path, uid, gid):
-        print '*** chown', path, uid, gid
-        return -errno.ENOSYS
-
-    def truncate (self, path, size):
-        print '*** truncate', path, size
-        return -errno.ENOSYS
-
-    def fsync (self, path, isFsyncFile):
-        print '*** fsync', path, isFsyncFile
-        return -errno.ENOSYS
-
-    def link (self, targetPath, linkPath):
-        print '*** link', targetPath, linkPath
-        return -errno.ENOSYS
-
-    def symlink (self, targetPath, linkPath):
-        print '*** symlink', targetPath, linkPath
-        return -errno.ENOSYS
-
-    def readlink (self, path):
-        print '*** readlink', path
-        return -errno.ENOSYS
-
-    def utime (self, path, times):
-        print '*** utime', path, times
         return -errno.ENOSYS
