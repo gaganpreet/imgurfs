@@ -23,7 +23,10 @@
 import sys
 import urllib
 import urllib2
-import simplejson
+try:
+    import simplejson
+except:
+    import json as simplejson
 import time
 from base64 import b64encode
 
@@ -54,7 +57,7 @@ class Imgur:
             self.ratelimit = dict(remaining = r.headers.dict['x-ratelimit-remaining'],
                                   limit = r.headers.dict['x-ratelimit-limit'])
         except urllib2.HTTPError, e:
-            error = json.loads(e.readline())
+            error = simplejson.loads(e.readline())
             if error.has_key('error'):
                 print error['error']['message']
                 sys.exit(0)
@@ -78,7 +81,7 @@ class Imgur:
     def images_count (self):
         """ Get the total number of images in user's account """
         r = self.api_request('account/images_count.json')
-        result = json.loads(r)
+        result = simplejson.loads(r)
         self.count = result['images_count']['count']
         return self.count
 
@@ -108,19 +111,19 @@ class Imgur:
                                                        'count' : 100, 
                                                        'noalbum': 'true'}))
                 if 'images' in r:
-                    images.extend(json.loads(r)['images'])
+                    images.extend(simplejson.loads(r)['images'])
         else:
             try:
                 r = self.api_request('account/albums/' + self.cache_albums['list'][album]['id'] + '.json')
                 if 'albums' in r:
-                    images.extend(json.loads(r)['albums'])
+                    images.extend(simplejson.loads(r)['albums'])
             except urllib2.HTTPError, e:
                 pass
 
         for i in images:
             extension = '.' + i['image']['type'].split('/')[1]
             name = i['image']['name'] or i['image']['hash']
-            name = name + extension
+            name = str(name + extension) # Fuse doesn't like unicode
             self.cache[album]['images'][name] = dict(hash = i['image']['hash'],
                                             size = i['image']['size'],
                                             type = i['image']['type'],
@@ -133,7 +136,7 @@ class Imgur:
     def albums_count (self):
         """ Get the total number of albums in user's account """
         r = self.api_request('account/albums_count.json')
-        result = json.loads(r)
+        result = simplejson.loads(r)
         self.album_count = result['albums_count']['count']
         return self.album_count
 
@@ -146,10 +149,11 @@ class Imgur:
 
         for i in xrange(1, self.albums_count()/100 + 2):
             r = self.api_request('account/albums.json?' + urllib.urlencode({'page' : i, 'count' : 100}))
-            albums.extend(json.loads(r)['albums'])
+            albums.extend(simplejson.loads(r)['albums'])
 
         for i in albums:
             name = i['title'] or i['id']
+            name = str(name) # Fuse doesn't like unicode
             self.cache_albums['list'][name] = dict(id = i['id'], datetime = i['datetime'])
 
         self.cache_albums['time'] = time.time()
@@ -165,11 +169,11 @@ class Imgur:
                                           image=b64encode(data), 
                                           type='base64'))
             except urllib2.HTTPError, e:
-                error = json.loads(e.readline())
+                error = simplejson.loads(e.readline())
                 if 'error' in error:
                     print error['error']['message']
                     return False
-            r = json.loads(r)
+            r = simplejson.loads(r)
             if 'images' in r:
                 if album != None:
                     imagehash = r['images']['image']['hash']
