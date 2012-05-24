@@ -217,11 +217,22 @@ class ImgurFS (fuse.Fuse):
             return -errno.ENOTEMPTY
         return -errno.ENOSYS
 
-    def rename (self, oldPath, newPath):
-        print '*** rename', oldPath, newPath
+    def rename (self, old_path, new_path):
+        """ Handle:
+            * Move an image out of an album
+            * Move an image into an album
+            * Rename an album
+            * Move an image out of one album into another album
+            """
+        print '*** rename', old_path, new_path
+
+        old_parent, old_child = split_path(old_path)
+        new_parent, new_child = split_path(new_path)
+
         return -errno.ENOSYS
 
     def statfs (self):
+        """ Returns API limit remaining as statfs """
         print '*** statfs'
         st = fuse.StatVfs()
         st.f_bsize = 1
@@ -231,5 +242,6 @@ class ImgurFS (fuse.Fuse):
         return st
 
     def unlink (self, path):
+        """ Remove an image """
         print '*** unlink', path
         return -errno.ENOSYS

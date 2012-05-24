@@ -25,7 +25,7 @@ import urllib
 import urllib2
 try:
     import simplejson
-except:
+except ImportError:
     import json as simplejson
 import time
 from base64 import b64encode
@@ -46,9 +46,12 @@ class Imgur:
         # Cache for images, album name is the key in the dictionary
         # None album points to unorganized images (/ directory)
         self.cache = {}
+        self.count = 0
         # Cache for albums
         self.cache_albums = {'time': 0, 
                              'list': {}}
+        self.album_count = 0
+
         try:
             r = self.opener.open(self.api_endpoint + 'signin.json',
                         urllib.urlencode({'username' : username,
@@ -114,11 +117,13 @@ class Imgur:
                     images.extend(simplejson.loads(r)['images'])
         else:
             try:
-                r = self.api_request('account/albums/' + self.cache_albums['list'][album]['id'] + '.json')
+                r = self.api_request('account/albums/' + 
+                                     self.cache_albums['list'][album]['id'] +
+                                     '.json')
                 if 'albums' in r:
                     images.extend(simplejson.loads(r)['albums'])
-            except urllib2.HTTPError, e:
-                pass
+            except urllib2.HTTPError:
+                return {}
 
         for i in images:
             extension = '.' + i['image']['type'].split('/')[1]
@@ -148,7 +153,9 @@ class Imgur:
         self.cache_albums['list'] = {}
 
         for i in xrange(1, self.albums_count()/100 + 2):
-            r = self.api_request('account/albums.json?' + urllib.urlencode({'page' : i, 'count' : 100}))
+            r = self.api_request('account/albums.json?' + 
+                                 urllib.urlencode({'page' : i, 
+                                                   'count' : 100}))
             albums.extend(simplejson.loads(r)['albums'])
 
         for i in albums:
@@ -184,10 +191,12 @@ class Imgur:
         return True
 
     def create_album (self, album):
+        """ Add a new album """
         self.api_request('account/albums.json', dict(title=album))
         self.album_list(use_cache = False)
 
     def add_images (self, album, hashes):
+        """ Move an image into an album """
         album_hash = self.cache_albums['list'][album]['id']
         self.api_request('account/albums/' + album_hash + '.json', 
                          dict(add_images = ','.join(hashes)))
