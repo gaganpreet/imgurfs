@@ -1,3 +1,7 @@
+Development
+===========
+I started writing this as my first major Python project, but I have had to give it up. Unfortunately, imgur's API does not make for a good filesystem. It fails quite often at my end, and is down many times altogether. Feel free to take over. 
+
 About
 =====
 
